@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { Loader2 } from 'lucide-react';
 
+
+
 // Black-Scholes calculation functions
 const normalCDF = (x) => {
   const a1 = 0.254829592;
@@ -37,8 +39,7 @@ const OptionsAnalyzer = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [optionsData, setOptionsData] = useState([]);
-
-  const apiKey = "XEXZDAL5VYK5SNHB";
+  const apiKey = "HWeUDKGCbiwF6hRucAp3gjFFLvjPy195";
 
   const stocks = [
     { symbol: 'NVDA', name: 'NVIDIA' },
@@ -47,34 +48,39 @@ const OptionsAnalyzer = () => {
     { symbol: 'META', name: 'Meta' },
     { symbol: 'AMD', name: 'AMD' }
   ];
-
+  
   const fetchStockData = async (symbol) => {
     try {
-      const response = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${apiKey}`);
+      const response = await fetch(
+        `https://api.polygon.io/v2/aggs/ticker/${symbol}/prev?adjusted=true&apiKey=${apiKey}`
+      );
       const data = await response.json();
-      const quote = data["Global Quote"];
-      const price = parseFloat(quote["05. price"]);
-      const volatility = 0.2 + Math.random() * 0.3; // Simulated volatility
+      const stock = data.results?.[0];
+
+      if (!stock) {
+        throw new Error(`No data found for ${symbol}`);
+      }
 
       return {
         symbol,
-        price,
-        change: parseFloat(quote["09. change"]),
-        volatility
+        price: stock.c, // Closing price
+        change: stock.c - stock.o, // Change (close - open)
+        volatility: 0.2 + Math.random() * 0.3 // Simulated volatility
       };
     } catch (error) {
       throw new Error(`Error fetching data for ${symbol}: ${error.message}`);
     }
   };
 
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       setError(null);
       try {
-        const promises = stocks.map(stock => fetchStockData(stock.symbol));
+        const promises = stocks.map((stock) => fetchStockData(stock.symbol));
         const results = await Promise.all(promises);
-        setStockData(results);
+        setStockData(results.filter((data) => data !== null));
       } catch (error) {
         setError(error.message);
       } finally {
@@ -87,15 +93,14 @@ const OptionsAnalyzer = () => {
 
   useEffect(() => {
     if (selectedStock) {
-      const stock = stockData.find(s => s.symbol === selectedStock);
+      const stock = stockData.find((s) => s.symbol === selectedStock);
       if (stock) {
-        // Calculate options for different strike prices and expiries
-        const strikes = [0.8, 0.9, 1.0, 1.1, 1.2].map(x => x * stock.price);
+        const strikes = [0.8, 0.9, 1.0, 1.1, 1.2].map((x) => x * stock.price);
         const expiries = [30, 60, 90, 180, 360];
 
         const optionsGrid = [];
-        strikes.forEach(strike => {
-          expiries.forEach(days => {
+        strikes.forEach((strike) => {
+          expiries.forEach((days) => {
             const callPrice = blackScholes(
               "call",
               stock.price,
@@ -104,7 +109,7 @@ const OptionsAnalyzer = () => {
               0.05, // risk-free rate
               stock.volatility
             );
-            
+
             const putPrice = blackScholes(
               "put",
               stock.price,
@@ -113,7 +118,7 @@ const OptionsAnalyzer = () => {
               0.05,
               stock.volatility
             );
-            
+
             optionsGrid.push({
               strike,
               days,
@@ -139,11 +144,6 @@ const OptionsAnalyzer = () => {
 
   return (
     <div className="p-4 max-w-6xl mx-auto">
-      {error && (
-        <div className="p-4 mb-4 text-red-700 bg-red-200 border border-red-700 rounded">
-          {error}
-        </div>
-      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {stockData.map((stock) => (
@@ -186,7 +186,6 @@ const OptionsAnalyzer = () => {
               </tbody>
             </table>
           </div>
-
           <h3 className="text-xl font-bold mt-6 mb-4">Price Analysis (30 Days)</h3>
           <LineChart
             width={800}
@@ -198,7 +197,6 @@ const OptionsAnalyzer = () => {
             <XAxis dataKey="strike" />
             <YAxis />
             <Tooltip />
-            <Legend />
             <Line type="monotone" dataKey="callPrice" stroke="#8884d8" name="Call" />
             <Line type="monotone" dataKey="putPrice" stroke="#82ca9d" name="Put" />
           </LineChart>
