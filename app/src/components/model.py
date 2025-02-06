@@ -25,20 +25,27 @@ def get_historical_data(ticker):
         file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(filename))
         if file_age < timedelta(hours=24):
             df = pd.read_csv(filename)
+            # Ensure proper column names and types
             df['ds'] = pd.to_datetime(df['ds'])
             return df[['ds', 'y']]
     
     # Fetch fresh data if cache is expired
     try:
+        # Download and process new data
         df = yf.download(ticker, period="5y")
         if df.empty:
             raise ValueError(f"No data found for {ticker}")
             
+        # Prepare DataFrame for Prophet
         df.reset_index(inplace=True)
-        df.to_csv(filename, index=False)
-        return df[['Date', 'Close']].rename(columns={'Date': 'ds', 'Close': 'y'})
+        df = df[['Date', 'Close']].rename(columns={'Date': 'ds', 'Close': 'y'})
         
+        # Save processed data
+        df.to_csv(filename, index=False)
+        return df
+
     except Exception as e:
+        # Clean up corrupted files
         if os.path.exists(filename):
             os.remove(filename)
         raise e
@@ -113,11 +120,14 @@ def get_prediction():
             return jsonify({'error': 'Model not found'}), 404
             
         model = joblib.load(model_path)
-        future = model.make_future_dataframe(periods=days)
+        
+        # Create future dates correctly
+        future = model.make_future_dataframe(periods=days, freq='D')
         forecast = model.predict(future)
         
+        # Format predictions properly
         predictions = forecast.tail(days)[['ds', 'yhat', 'yhat_lower', 'yhat_upper']]
-        predictions['ds'] = predictions['ds'].dt.strftime('%Y-%m-%d')
+        predictions['ds'] = predictions['ds'].dt.strftime('%Y-%m-%d')  # Remove timezone
         
         return jsonify({
             'ticker': ticker,

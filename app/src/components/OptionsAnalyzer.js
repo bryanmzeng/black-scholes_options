@@ -181,48 +181,38 @@ const OptionsAnalyzer = () => {
       const loadPredictionsAndCalculate = async () => {
         const stock = stockData.find((s) => s.symbol === selectedStock);
         if (!stock) return;
-
+      
         const preds = await fetchPredictions(selectedStock);
         setPredictions(preds);
-
+      
         const strikes = [0.8, 0.9, 1.0, 1.1, 1.2].map(x => x * stock.price);
         const expiries = [30, 60, 90, 180, 360];
-
+      
         const optionsGrid = strikes.flatMap(strike => 
           expiries.map(days => {
-            const prediction = preds?.find(p => 
-              new Date(p.ds).getTime() === 
-              new Date(new Date().getTime() + days * 86400000).getTime()
-            );
-
+            // Calculate target date correctly
+            const targetDate = new Date();
+            targetDate.setDate(targetDate.getDate() + days);
+            const targetDateString = targetDate.toISOString().split('T')[0];
+            
+            // Find prediction with matching date
+            const prediction = preds?.find(p => p.ds === targetDateString);
+      
+            // Use average of current and predicted price
             const adjustedPrice = prediction 
               ? (stock.price + prediction.yhat) / 2 
               : stock.price;
-
+      
             return {
               strike,
               days,
-              callPrice: blackScholes(
-                "call",
-                adjustedPrice,
-                strike,
-                days / 365,
-                0.05,
-                stock.volatility
-              ),
-              putPrice: blackScholes(
-                "put",
-                adjustedPrice,
-                strike,
-                days / 365,
-                0.05,
-                stock.volatility
-              ),
+              callPrice: blackScholes("call", adjustedPrice, strike, days / 364, 0.05, stock.volatility),
+              putPrice: blackScholes("put", adjustedPrice, strike, days / 364, 0.05, stock.volatility),
               predictedPrice: prediction?.yhat
             };
           })
         );
-
+      
         setOptionsData(optionsGrid);
       };
 
