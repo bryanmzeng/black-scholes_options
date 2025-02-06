@@ -54,11 +54,7 @@ const OptionsAnalyzer = () => {
       const trainResponse = await fetch('http://localhost:5002/train', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ticker: symbol,
-          start_date: '2020-01-01',
-          end_date: new Date().toISOString().split('T')[0]
-        })
+        body: JSON.stringify({ ticker: symbol })
       });
 
       if (!trainResponse.ok) throw new Error('Training failed');
@@ -75,47 +71,63 @@ const OptionsAnalyzer = () => {
       setModelTraining(false);
     }
   };
+
   const fetchStockData = async (symbol) => {
     try {
-      // Get historical data from Flask backend
-      const historyResponse = await fetch(
-        `http://localhost:5002/history?ticker=${symbol}&start_date=2020-01-01&end_date=${new Date().toISOString().split('T')[0]}`
-      );
-      
-      // Calculate volatility from historical data
+      // Get historical data from Flask backend (uses backend cache)
+      const historyResponse = await fetch(`http://localhost:5002/history?ticker=${symbol}`);
       const historyData = await historyResponse.json();
       const closes = historyData.history?.map(h => h.close) || [];
-      const logReturns = [];
       
+      // Calculate volatility from historical data
+      const logReturns = [];
       for (let i = 1; i < closes.length; i++) {
         logReturns.push(Math.log(closes[i] / closes[i - 1]));
       }
-      
       const volatility = logReturns.length > 0 
         ? Math.sqrt(252) * Math.sqrt(logReturns.reduce((a, b) => a + b**2, 0) / logReturns.length)
         : 0.3;
-  
-      // Get latest price from Polygon with better error handling
-      const polygonResponse = await fetch(
-        `https://api.polygon.io/v2/aggs/ticker/${symbol}/prev?adjusted=true&apiKey=${apiKey}`
-      );
-      
-      if (!polygonResponse.ok) {
-        throw new Error(`Polygon API error: ${polygonResponse.status}`);
+
+      // Check cache for Polygon data
+      const cacheKey = `polygon-${symbol}`;
+      const cached = localStorage.getItem(cacheKey);
+      const now = new Date().getTime();
+      let stockPrice = 0;
+      let cachedUsed = false;
+
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        if (now - timestamp < 3600000) { // 1 hour cache
+          stockPrice = data.c;
+          cachedUsed = true;
+        }
       }
-      
-      const polygonData = await polygonResponse.json();
-      
-      // Validate Polygon response structure
-      if (!polygonData.results || !polygonData.results[0] || !polygonData.results[0].c) {
-        throw new Error('Invalid data format from Polygon API');
+
+      // Fetch fresh data if no valid cache
+      if (!cachedUsed) {
+        const polygonResponse = await fetch(
+          `https://api.polygon.io/v2/aggs/ticker/${symbol}/prev?adjusted=true&apiKey=${apiKey}`
+        );
+        
+        if (!polygonResponse.ok) {
+          throw new Error(`Polygon API error: ${polygonResponse.status}`);
+        }
+        
+        const polygonData = await polygonResponse.json();
+        if (!polygonData.results?.[0]?.c) {
+          throw new Error('Invalid data format from Polygon API');
+        }
+        
+        stockPrice = polygonData.results[0].c;
+        localStorage.setItem(cacheKey, JSON.stringify({
+          data: polygonData.results[0],
+          timestamp: now
+        }));
       }
-      
-      const stock = polygonData.results[0];
-  
+
       return {
         symbol,
-        price: stock.c,
+        price: stockPrice,
         volatility: volatility || 0.3,
         history: historyData.history,
         error: null
@@ -123,6 +135,20 @@ const OptionsAnalyzer = () => {
       
     } catch (error) {
       console.error(`Error fetching ${symbol}:`, error);
+      
+      // Fallback to cached data if available
+      const cached = localStorage.getItem(`polygon-${symbol}`);
+      if (cached) {
+        const { data } = JSON.parse(cached);
+        return {
+          symbol,
+          price: data.c || 0,
+          volatility: 0.3,
+          history: [],
+          error: error.message
+        };
+      }
+      
       return {
         symbol,
         price: 0,
@@ -228,34 +254,34 @@ const OptionsAnalyzer = () => {
         </div>
       )}
 
-<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-  {stockData.map((stock) => (
-    <div
-      key={stock.symbol}
-      onClick={() => !stock.error && setSelectedStock(stock.symbol)}
-      className={`p-4 border rounded cursor-pointer transition-all ${
-        stock.error ? 'bg-red-100 border-red-500' :
-        selectedStock === stock.symbol 
-          ? 'bg-blue-100 border-blue-500 scale-105' 
-          : 'bg-white hover:bg-gray-50'
-      }`}
-    >
-      {stock.error && (
-        <div className="text-red-500 text-sm mb-2">
-          Error: {stock.error}
-        </div>
-      )}
-      <h3 className="font-bold text-lg">{stock.symbol}</h3>
-      <p className="text-gray-600 text-sm">{stock.name}</p>
-      <p className="text-2xl font-semibold mt-2">
-        {stock.price > 0 ? `$${stock.price.toFixed(2)}` : 'N/A'}
-      </p>
-      <p className="text-sm text-gray-500">
-        Volatility: {(stock.volatility * 100).toFixed(1)}%
-      </p>
-    </div>
-  ))}
-</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {stockData.map((stock) => (
+          <div
+            key={stock.symbol}
+            onClick={() => !stock.error && setSelectedStock(stock.symbol)}
+            className={`p-4 border rounded cursor-pointer transition-all ${
+              stock.error ? 'bg-red-100 border-red-500' :
+              selectedStock === stock.symbol 
+                ? 'bg-blue-100 border-blue-500 scale-105' 
+                : 'bg-white hover:bg-gray-50'
+            }`}
+          >
+            {stock.error && (
+              <div className="text-red-500 text-sm mb-2">
+                Error: {stock.error}
+              </div>
+            )}
+            <h3 className="font-bold text-lg">{stock.symbol}</h3>
+            <p className="text-gray-600 text-sm">{stock.name}</p>
+            <p className="text-2xl font-semibold mt-2">
+              {stock.price > 0 ? `$${stock.price.toFixed(2)}` : 'N/A'}
+            </p>
+            <p className="text-sm text-gray-500">
+              Volatility: {(stock.volatility * 100).toFixed(1)}%
+            </p>
+          </div>
+        ))}
+      </div>
 
       {selectedStock && (
         <div className="mt-6 space-y-8">

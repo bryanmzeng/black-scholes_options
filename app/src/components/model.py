@@ -17,20 +17,25 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
 
 def get_historical_data(ticker):
-    """Fetch and cache historical data, overwriting existing files"""
-    filename = f"{DATA_DIR}/{ticker}.csv"  # Single file per ticker
+    """Fetch and cache historical data, using cache if less than 24h old"""
+    filename = f"{DATA_DIR}/{ticker}.csv"
     
+    # Check if cached data exists and is recent
+    if os.path.exists(filename):
+        file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(filename))
+        if file_age < timedelta(hours=24):
+            df = pd.read_csv(filename)
+            df['ds'] = pd.to_datetime(df['ds'])
+            return df[['ds', 'y']]
+    
+    # Fetch fresh data if cache is expired
     try:
-        # Always fetch fresh data and overwrite
-        end_date = datetime.today().strftime('%Y-%m-%d')
-        df = yf.download(ticker, period="5y")  # 5 years of data
-        
+        df = yf.download(ticker, period="5y")
         if df.empty:
             raise ValueError(f"No data found for {ticker}")
             
         df.reset_index(inplace=True)
         df.to_csv(filename, index=False)
-        
         return df[['Date', 'Close']].rename(columns={'Date': 'ds', 'Close': 'y'})
         
     except Exception as e:
@@ -68,10 +73,16 @@ def train_model():
         if not ticker:
             return jsonify({'error': 'Missing ticker parameter'}), 400
 
-        # Always generate fresh data
-        df = get_historical_data(ticker)
+        model_path = f"{MODEL_DIR}/{ticker}.joblib"
         
-        # Create/overwrite model
+        # Check for recent model
+        if os.path.exists(model_path):
+            model_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(model_path))
+            if model_age < timedelta(hours=24):
+                return jsonify({'status': 'success', 'ticker': ticker, 'message': 'Cached model used'}), 200
+        
+        # Train new model if needed
+        df = get_historical_data(ticker)
         model = Prophet(
             daily_seasonality=False,
             weekly_seasonality=True,
@@ -80,9 +91,6 @@ def train_model():
         )
         model.add_country_holidays(country_name='US')
         model.fit(df)
-        
-        # Overwrite existing model
-        model_path = f"{MODEL_DIR}/{ticker}.joblib"
         joblib.dump(model, model_path)
         
         return jsonify({'status': 'success', 'ticker': ticker}), 200
