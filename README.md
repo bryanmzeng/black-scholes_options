@@ -1,24 +1,61 @@
 # Options Analyzer
 
 ## Overview
-The Options Analyzer is a web application that allows users to analyze stock options using the Black-Scholes model. It fetches stock data from an external API and calculates call and put option prices for various strike prices and expiration dates. The application provides a visual representation of the data using a line chart.
+A full-stack application for stock options analysis combining real-time data with machine learning predictions. The system uses historical stock data to train forecasting models and calculates option prices using the Black-Scholes model with integrated price predictions.
+
+## Architecture
+![System Architecture](https://via.placeholder.com/800x400.png?text=Flask+Backend+%2B+React+Frontend+Architecture)
 
 ## Technologies Used
 
 ### Frontend
-- **React**: The frontend of the application is built using React, a popular JavaScript library for building user interfaces.
-- **Recharts**: Recharts is used to render interactive and responsive charts for visualizing option prices.
-- **Lucide-React**: This library provides the loader icon used during data fetching.
+- **React** - UI framework with state management
+- **Recharts** - Interactive data visualization
+- **Lucide-React** - Icon library
+- **LocalStorage** - Browser caching layer
 
 ### Backend
-- **Fetch API**: The Fetch API is used to make HTTP requests to the external stock data API.
-- **Polygon.io API**: This application uses the Polygon.io API to fetch historical stock data.
+- **Flask** - REST API server
+- **Prophet** - Time series forecasting (FB NeuralProphet)
+- **yfinance** - Yahoo Finance historical data
+- **Joblib** - Model serialization
 
-### Algorithms
-- **Black-Scholes Model**: The Black-Scholes model is implemented to calculate the theoretical prices of call and put options.
-  - **Normal CDF Calculation**: A custom implementation of the cumulative distribution function (CDF) for a normal distribution is used in the Black-Scholes model.
+### APIs
+- **Polygon.io** - Real-time stock prices (with caching)
+- **Yahoo Finance** - Historical price data (via yfinance)
 
 ## Key Features
-- **Stock Data Fetching**: The application fetches stock data for selected stocks using the Polygon.io API.
-- **Options Price Calculation**: Call and put prices are calculated using the Black-Scholes model for different strike prices and expiration dates.
-- **Data Visualization**: Option prices are visualized using line charts for better analysis.
+
+### Predictive Options Pricing
+- Black-Scholes model integration with price forecasts
+- Strike prices from 80% to 120% of current price
+- Expiries from 30 to 360 days
+- Volatility calculated from 5-year historical data
+
+### Machine Learning Forecasting
+- Facebook Prophet time series models
+- Automatic daily retraining of prediction models
+- 1-year price forecasts integrated into options pricing
+- Holiday effects and seasonality modeling
+
+### Caching System
+- **Backend Caching**:
+  - Historical data cached for 24 hours
+  - Trained models cached for 24 hours
+  - CSV-based data storage (5 years history)
+  
+- **Frontend Caching**:
+  - Polygon API responses cached for 1 hour
+  - LocalStorage fallback for failed API calls
+  - Graceful stale data handling
+
+## Prediction Model
+- **Facebook Prophet Configuration**:
+```python
+Prophet(
+    daily_seasonality=False,
+    weekly_seasonality=True,
+    yearly_seasonality=True,
+    changepoint_prior_scale=0.05,
+    holidays=US_holidays
+)
