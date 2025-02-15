@@ -7,6 +7,8 @@ from prophet import Prophet
 import joblib
 import os
 import traceback
+import numpy as np
+from sklearn.metrics import mean_squared_error
 
 app = Flask(__name__)
 CORS(app)
@@ -15,6 +17,109 @@ MODEL_DIR = 'models'
 DATA_DIR = 'data'
 os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
+
+
+@app.route('/backtest', methods=['GET'])
+def backtest():
+    try:
+        ticker = request.args.get('ticker')
+        if not ticker:
+            return jsonify({'error': 'Missing ticker parameter'}), 400
+
+        # Get full historical data
+        df = get_historical_data(ticker)
+        df['ds'] = pd.to_datetime(df['ds'])
+        
+        # Backtest parameters
+        initial_capital = 10000
+        lookback_window = 180  # 6 months training window
+        forward_days = 30      # Prediction horizon
+        
+        results = []
+        portfolio_value = initial_capital
+        benchmark_value = initial_capital
+        positions = []
+        
+        # Track the starting price for benchmark calculation
+        start_price = df['y'].iloc[lookback_window]
+        
+        for i in range(lookback_window, len(df) - forward_days):
+            # Split train/test
+            train_data = df.iloc[i-lookback_window:i]
+            test_data = df.iloc[i:i+forward_days]
+            
+            # Train model
+            model = Prophet(
+                daily_seasonality=False,
+                weekly_seasonality=True,
+                yearly_seasonality=True,
+                changepoint_prior_scale=0.05
+            ).fit(train_data)
+            
+            # Make prediction
+            future = model.make_future_dataframe(periods=forward_days)
+            forecast = model.predict(future)
+            predicted_return = forecast.iloc[-1]['yhat'] / train_data.iloc[-1]['y'] - 1
+            
+            # Calculate returns properly
+            current_price = train_data.iloc[-1]['y']
+            next_price = test_data.iloc[-1]['y']
+            actual_return = (next_price - current_price) / current_price
+            
+            # Trading strategy
+            position_size = 0
+            if predicted_return > 0.02:  # 2% predicted return threshold
+                position_size = portfolio_value * 0.1  # 10% position size
+                portfolio_value += position_size * actual_return
+            
+            # Update benchmark (buy & hold from start)
+            benchmark_value = initial_capital * (next_price / start_price)
+            
+            results.append({
+                'date': train_data.iloc[-1]['ds'].strftime('%Y-%m-%d'),
+                'portfolio': portfolio_value,
+                'benchmark': benchmark_value,
+                'predicted_return': predicted_return,
+                'actual_return': actual_return
+            })
+        
+        # Calculate metrics
+        portfolio_returns = pd.Series([r['portfolio'] for r in results]).pct_change().dropna()
+        benchmark_returns = pd.Series([r['benchmark'] for r in results]).pct_change().dropna()
+        
+        # Calculate Sharpe ratio with proper annualization
+        risk_free_rate = 0.03  # 3% annual risk-free rate
+        daily_rf = (1 + risk_free_rate) ** (1/252) - 1
+        excess_returns = portfolio_returns - daily_rf
+        sharpe_ratio = np.sqrt(252) * excess_returns.mean() / excess_returns.std() if len(excess_returns) > 0 else 0
+        
+        # Calculate alpha properly
+        alpha = portfolio_returns.mean() - benchmark_returns.mean()
+        
+        # Calculate max drawdown
+        portfolio_series = pd.Series([r['portfolio'] for r in results])
+        rolling_max = portfolio_series.expanding().max()
+        drawdowns = portfolio_series / rolling_max - 1
+        max_drawdown = drawdowns.min()
+        
+        return jsonify({
+            'ticker': ticker,
+            'results': results,
+            'metrics': {
+                'total_return': (portfolio_value / initial_capital) - 1,
+                'benchmark_return': (benchmark_value / initial_capital) - 1,
+                'sharpe_ratio': float(sharpe_ratio),
+                'alpha': float(alpha),
+                'max_drawdown': float(max_drawdown)
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'details': traceback.format_exc()
+        }), 500
 
 def get_historical_data(ticker):
     """Fetch and cache historical data, using cache if less than 24h old"""

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { Loader2 } from 'lucide-react';
+import BacktestAnalysis from './BacktestAnalysis';
 
 const normalCDF = (x) => {
   const a1 = 0.254829592;
@@ -343,6 +344,7 @@ const OptionsAnalyzer = () => {
               />
             </LineChart>
           </div>
+          <BacktestAnalysis selectedStock={selectedStock} />
         </div>
       )}
     </div>
